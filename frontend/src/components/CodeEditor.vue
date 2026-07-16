@@ -11,8 +11,8 @@
         <span v-else class="tab active">{{ currentTab }}</span>
       </div>
       <div class="header-actions">
-        <button v-if="exerciseData" class="submit-btn" @click="submitForReview" :disabled="submitting">
-          {{ submitting ? '提交中...' : '📝 提交练习反馈' }}
+        <button class="submit-btn" @click="submitForReview" :disabled="submitting">
+          {{ submitting ? (exerciseData ? '提交中...' : langStore.t('codeEditor.submitting')) : (exerciseData ? '📝 提交练习反馈' : langStore.t('codeEditor.submitFeedback')) }}
         </button>
         <button class="run-btn" @click="runCode" :disabled="running">
           <span v-if="!running">{{ currentExecutor === 'iframe' ? 'Preview' : langStore.t('codeEditor.run') }}</span>
@@ -22,7 +22,7 @@
       </div>
     </div>
     
-    <div class="editor-container" ref="editorContainer"></div>
+    <div class="editor-container" ref="editorContainer" @mousedown="focusEditor"></div>
     
     <div class="output-panel" :class="{ 'iframe-mode': currentExecutor === 'iframe' }">
       <div class="output-header">
@@ -207,6 +207,9 @@ onMounted(async () => {
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
     runCode()
   })
+
+  // 自动聚焦编辑器，否则空格键等键盘输入不会生效
+  editor.focus()
 })
 
 onBeforeUnmount(() => {
@@ -245,9 +248,16 @@ watch(() => props.exerciseData, (data) => {
       }
     }
     editor.setValue(data.code)
+    editor.focus()
     clearOutput()
   }
 }, { immediate: true })
+
+function focusEditor() {
+  if (editor) {
+    editor.focus()
+  }
+}
 
 function closeExercise() {
   // Restore default code for current language
@@ -352,7 +362,6 @@ const clearOutput = () => {
   height: 100%;
   border: 1px solid #3c3c3c;
   border-radius: 8px;
-  overflow: hidden;
   background: #1e1e1e;
 }
 
@@ -364,6 +373,8 @@ const clearOutput = () => {
   height: 40px;
   background: #252526;
   border-bottom: 1px solid #3c3c3c;
+  border-radius: 8px 8px 0 0;
+  overflow: hidden;
 }
 
 .header-actions {
