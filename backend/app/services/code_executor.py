@@ -75,7 +75,9 @@ class BaseExecutor(ABC):
     def execute(self, code: str) -> Dict:
         ...
 
-    def _truncate(self, text: str) -> str:
+    def _truncate(self, text: str | None) -> str:
+        if not text:
+            return ""
         if len(text) > self.max_output:
             return text[:self.max_output] + "\n... (输出过长，已截断)"
         return text
@@ -111,6 +113,8 @@ class BaseExecutor(ABC):
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=self.timeout,
                 cwd=tempfile.gettempdir(),
             )
@@ -367,7 +371,8 @@ class BashExecutor(BaseExecutor):
                 encoded = base64.b64encode(code.encode('utf-16le')).decode()
                 result = subprocess.run(
                     ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-                    capture_output=True, text=True, timeout=self.timeout,
+                    capture_output=True, text=True, encoding='utf-8', errors='replace',
+                    timeout=self.timeout,
                 )
                 output = self._truncate(result.stdout)
                 error = self._truncate(result.stderr)
