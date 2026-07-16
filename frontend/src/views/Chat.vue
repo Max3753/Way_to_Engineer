@@ -176,6 +176,7 @@ const textareaRef = ref<HTMLTextAreaElement>()
 const sessionData = ref<any>(null)
 const masteredLoading = ref(false)
 const completionData = ref<{ passed: boolean; correct: number; total: number; lessonCompleted: boolean } | null>(null)
+const nextLessonData = ref<{ id: string; title: string; description: string; module_title: string; module_id: string; path_type?: string } | null>(null)
 const currentExercise = ref<{ code: string; language: string; lessonId?: string | null } | null>(null)
 
 // 练习追踪
@@ -407,7 +408,17 @@ const checkLessonComplete = (quizResult?: { correct: number; total: number }) =>
   
   axios.post(`/api/learning/complete-lesson/${lessonId}`, null, {
     params: { user_id: authStore.userId }
-  }).then(() => {
+  }).then((res) => {
+    // 保存下一课程信息（包含 path_type）
+    const next = res.data?.next_lesson
+    if (next) {
+      nextLessonData.value = {
+        ...next,
+        path_type: learningContext.value?.path_type,
+      }
+    } else {
+      nextLessonData.value = null
+    }
     completionData.value = {
       passed: true,
       correct: quizResult?.correct || 0,
@@ -486,9 +497,30 @@ const onExerciseDetected = (data: { code: string; language: string }) => {
 }
 
 const goNextLesson = () => {
-  // Navigate to learning page
+  const next = nextLessonData.value
   completionData.value = null
-  window.location.hash = '#/learning'
+  nextLessonData.value = null
+
+  if (!next || !next.path_type) {
+    // 没有下一课信息 → 回到学习路径页
+    window.location.hash = '#/learning'
+    return
+  }
+
+  // 自动启动下一课：设置学习上下文并发消息给导师
+  const ctx = {
+    message: `请开始讲解"${next.title}"。这是下一节课的内容，请详细讲解。`,
+    path_type: next.path_type,
+    lesson_id: next.id,
+    module_id: next.module_id,
+    lesson_title: next.title,
+    module_title: next.module_title,
+  }
+  learningContext.value = ctx
+  input.value = ctx.message
+  saveSession(ctx.message)
+  // 延迟发送确保 DOM 更新
+  setTimeout(() => send(ctx), 100)
 }
 </script>
 
