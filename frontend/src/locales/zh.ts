@@ -38,6 +38,14 @@ export default {
     placeholder: '输入你的编程问题...',
     send: '发送',
     hint: '按 Enter 发送，Shift + Enter 换行',
+    continueSession: '欢迎回来！上次你在学习 {lesson}，要继续吗？',
+    continueBtn: '继续学习',
+    masteredBtn: '📖 我已掌握',
+    quizPass: '🎉 答对了 {correct}/{total} 题，太棒了！',
+    quizFail: '💪 答对了 {correct}/{total} 题，再接再厉！可以重新学习或尝试通过。',
+    lessonCompleted: '✅ 恭喜！课程已标记完成！',
+    nextLesson: '学习下一课 →',
+    allComplete: '全部课程已完成！去学习路径看看吧。',
   },
 
   // ===== Learning.vue =====

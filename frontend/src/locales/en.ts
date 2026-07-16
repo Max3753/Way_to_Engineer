@@ -38,6 +38,14 @@ export default {
     placeholder: 'Type your programming question...',
     send: 'Send',
     hint: 'Enter to send, Shift+Enter for new line',
+    continueSession: 'Welcome back! You were learning {lesson}. Continue?',
+    continueBtn: 'Continue',
+    masteredBtn: '📖 I\'ve mastered this',
+    quizPass: '🎉 {correct}/{total} correct! Great job!',
+    quizFail: '💪 {correct}/{total} correct. Keep trying!',
+    lessonCompleted: '✅ Lesson marked as completed!',
+    nextLesson: 'Next Lesson →',
+    allComplete: 'All lessons complete! Check your learning path.',
   },
 
   // ===== Learning.vue =====

@@ -45,6 +45,17 @@
             </div>
           </div>
         </div>
+
+        <div v-if="sessionData" class="session-banner">
+          <div class="session-banner-content">
+            <span class="session-banner-icon">👋</span>
+            <div class="session-banner-text">
+              <p>{{ langStore.t('chat.continueSession', { lesson: sessionData.lesson_title || '' }) }}</p>
+            </div>
+            <button class="btn btn-primary btn-sm" @click="continueSession">继续学习 →</button>
+            <button class="session-dismiss" @click="sessionData = null">✕</button>
+          </div>
+        </div>
         
         <div 
           v-for="(msg, index) in messages" 
@@ -57,13 +68,24 @@
           <div class="msg-body">
             <div v-if="msg.agent_name" class="agent-tag" :class="'tag-' + getAgentType(msg.agent_name)">{{ msg.agent_name }}</div>
             <div v-if="msg.role === 'assistant'" class="bubble assistant-bubble">
-              <MarkdownRenderer :content="msg.content" />
+              <MarkdownRenderer
+                :content="msg.content"
+                @quiz-result="(r) => onQuizResult(r, msg)"
+                @exercise-detected="onExerciseDetected"
+                @content-meta="(m) => onContentMeta(m, msg)"
+              />
             </div>
             <div v-else class="bubble user-bubble">{{ msg.content }}</div>
+            <div v-if="isLastAssistantMessage(index) && learningContext" class="mastered-section">
+              <button class="mastered-btn" @click="masteredClick" :disabled="masteredLoading">
+                <span v-if="!masteredLoading">{{ langStore.t('chat.masteredBtn') }}</span>
+                <span v-else class="spinner"></span>
+              </button>
+            </div>
           </div>
           <div v-if="msg.role === 'user'" class="msg-avatar user-avatar">👤</div>
         </div>
-        
+
         <div v-if="loading" class="message assistant">
           <div class="msg-avatar">🤖</div>
           <div class="msg-body">
@@ -73,6 +95,30 @@
               <span class="dot"></span>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Completion banner (between messages and input) -->
+      <div v-if="completionData" class="completion-banner" :class="completionData.passed ? 'pass' : 'fail'">
+        <div class="completion-content">
+          <span class="completion-icon">{{ completionData.passed ? '🎉' : '💪' }}</span>
+          <div class="completion-text">
+            <p v-if="completionData.passed">
+              {{ langStore.t('chat.quizPass', { correct: completionData.correct, total: completionData.total }) }}
+            </p>
+            <p v-else>
+              {{ langStore.t('chat.quizFail', { correct: completionData.correct, total: completionData.total }) }}
+            </p>
+            <p v-if="completionData.lessonCompleted" class="lesson-complete">
+              {{ langStore.t('chat.lessonCompleted') }}
+            </p>
+          </div>
+          <button v-if="completionData.lessonCompleted" class="btn btn-primary btn-sm" @click="goNextLesson">
+            {{ langStore.t('chat.nextLesson') }}
+          </button>
+          <button v-else class="btn btn-outline btn-sm" @click="completionData = null">
+            {{ langStore.t('chat.close') }}
+          </button>
         </div>
       </div>
       
@@ -97,13 +143,13 @@
     
     <!-- 右侧代码区 -->
     <div class="code-section">
-      <CodeEditor />
+      <CodeEditor :exerciseData="currentExercise" @exercise-submitted="onExerciseSubmitted" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onActivated } from 'vue'
+import { ref, computed, nextTick, onMounted, onActivated } from 'vue'
 import axios from 'axios'
 import CodeEditor from '../components/CodeEditor.vue'
 import MarkdownRenderer from '../components/MarkdownRenderer.vue'
@@ -127,12 +173,26 @@ const loading = ref(false)
 const messagesContainer = ref<HTMLElement>()
 const textareaRef = ref<HTMLTextAreaElement>()
 
+const sessionData = ref<any>(null)
+const masteredLoading = ref(false)
+const completionData = ref<{ passed: boolean; correct: number; total: number; lessonCompleted: boolean } | null>(null)
+const currentExercise = ref<{ code: string; language: string; lessonId?: string | null } | null>(null)
+
+// 练习追踪
+const pendingExerciseCount = ref(0)        // 当前消息中待完成的练习数
+const completedExerciseCount = ref(0)       // 已完成的练习数
+
 const autoResize = () => {
   const textarea = textareaRef.value
   if (textarea) {
     textarea.style.height = 'auto'
     textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
   }
+}
+
+const isLastAssistantMessage = (index: number) => {
+  if (index !== messages.value.length - 1) return false
+  return messages.value[index].role === 'assistant'
 }
 
 const clearChat = () => {
@@ -146,6 +206,9 @@ const send = async (context?: Record<string, any>) => {
   const text = input.value.trim()
   
   if (!text || loading.value) return
+
+  // 发送新消息时清理练习模式
+  currentExercise.value = null
   
   messages.value.push({ role: 'user', content: text })
   input.value = ''
@@ -184,6 +247,11 @@ const send = async (context?: Record<string, any>) => {
     // 记录消息
     agentStore.recordMessage(agentType, response.data.reply)
     agentStore.resetAllStatus()
+    
+    // 保存学习会话（带最新回复摘要）
+    if (learningContext.value) {
+      saveSession(response.data.reply)
+    }
   } catch (error: any) {
     const errorMsg = error.response?.data?.detail || error.message || '未知错误'
     messages.value.push({ 
@@ -193,7 +261,6 @@ const send = async (context?: Record<string, any>) => {
     agentStore.resetAllStatus()
   } finally {
     loading.value = false
-    learningContext.value = null
     await scrollToBottom()
   }
 }
@@ -205,7 +272,20 @@ const scrollToBottom = async () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // Load saved session
+  try {
+    const sessionRes = await axios.get('/api/learning/session', {
+      params: { user_id: authStore.userId }
+    })
+    const sess = sessionRes.data.session
+    if (sess && sess.lesson_id) {
+      sessionData.value = sess
+    }
+  } catch (e) {
+    console.error('Failed to load session:', e)
+  }
+
   checkPendingMessage()
 })
 
@@ -225,6 +305,7 @@ const checkPendingMessage = () => {
       const context = JSON.parse(pendingContext)
       learningContext.value = context
       input.value = context.message
+      saveSession() // 保存学习会话到后端
       // 延迟确保DOM更新后再发送
       setTimeout(() => {
         send(context)
@@ -245,6 +326,169 @@ const checkPendingMessage = () => {
       send()
     }, 100)
   }
+}
+
+const saveSession = async (summary?: string) => {
+  if (!learningContext.value) return
+  try {
+    await axios.post('/api/learning/session', {
+      lesson_id: learningContext.value.lesson_id,
+      module_id: learningContext.value.module_id,
+      lesson_title: learningContext.value.lesson_title,
+      module_title: learningContext.value.module_title,
+      path_type: learningContext.value.path_type,
+      last_reply_summary: summary || '',
+    }, { params: { user_id: authStore.userId } })
+  } catch (e) {
+    // 静默失败，不影响用户体验
+  }
+}
+
+const clearSession = async () => {
+  try {
+    await axios.post('/api/learning/session', {}, { params: { user_id: authStore.userId, clear: true } })
+  } catch (e) { /* ignore */ }
+}
+
+const continueSession = async () => {
+  if (!sessionData.value) return
+  const ctx = {
+    message: `我想继续学习"${sessionData.value.lesson_title}"这个课程。请帮我讲解这个主题。`,
+    path_type: sessionData.value.path_type,
+    lesson_id: sessionData.value.lesson_id,
+    module_id: sessionData.value.module_id,
+    lesson_title: sessionData.value.lesson_title,
+    module_title: sessionData.value.module_title,
+  }
+  learningContext.value = ctx
+  input.value = ctx.message
+  sessionData.value = null
+  await saveSession()
+  setTimeout(() => send(ctx), 100)
+}
+
+const masteredClick = async () => {
+  if (!learningContext.value || masteredLoading.value) return
+  masteredLoading.value = true
+  
+  const quizMsg = `我已完成"${learningContext.value.lesson_title || ''}"的学习。作为编程导师，请出 2-3 道测验题检验我的理解，请严格按照以下格式：
+1. 选择题使用 \`\`\`quiz JSON 格式
+2. 代码练习题使用 \`\`\`exercise:python（或对应的语言）格式，题目作为注释写在代码里，留出填空位让用户自己写代码
+3. 题目难度匹配我当前的水平`
+  
+  try {
+    const res = await axios.post('/api/chat/', {
+      message: quizMsg,
+      context: learningContext.value,
+    })
+    messages.value.push({
+      role: 'assistant',
+      content: res.data.reply,
+      agent_name: res.data.agent_name,
+    })
+    await scrollToBottom()
+  } catch (err: any) {
+    messages.value.push({
+      role: 'assistant',
+      content: `抱歉，出题失败：${err.message}`
+    })
+  } finally {
+    masteredLoading.value = false
+  }
+}
+
+const checkLessonComplete = (quizResult?: { correct: number; total: number }) => {
+  // 有练习时要求全部提交完成
+  if (pendingExerciseCount.value > 0 && completedExerciseCount.value < pendingExerciseCount.value) {
+    return
+  }
+  const lessonId = learningContext.value?.lesson_id
+  if (!lessonId) return
+  
+  axios.post(`/api/learning/complete-lesson/${lessonId}`, null, {
+    params: { user_id: authStore.userId }
+  }).then(() => {
+    completionData.value = {
+      passed: true,
+      correct: quizResult?.correct || 0,
+      total: quizResult?.total || 0,
+      lessonCompleted: true,
+    }
+    learningContext.value = null
+    clearSession()
+  }).catch(e => {
+    console.error('Failed to complete lesson:', e)
+    completionData.value = {
+      passed: true,
+      correct: quizResult?.correct || 0,
+      total: quizResult?.total || 0,
+      lessonCompleted: false,
+    }
+  })
+}
+
+const onQuizResult = (result: { total: number; correct: number }) => {
+  if (!learningContext.value) return
+  
+  const passed = result.correct / result.total >= 0.6
+  
+  if (passed && result.total >= 2) {
+    if (pendingExerciseCount.value > 0 && completedExerciseCount.value < pendingExerciseCount.value) {
+      // 有练习未完成，暂存结果但不等完成
+      completionData.value = {
+        passed: true,
+        correct: result.correct,
+        total: result.total,
+        lessonCompleted: false,
+      }
+    } else {
+      // 无练习 或 练习已全部提交 → 直接完成
+      checkLessonComplete(result)
+    }
+  } else if (passed && result.total < 2) {
+    completionData.value = null
+  } else {
+    completionData.value = {
+      passed: false,
+      correct: result.correct,
+      total: result.total,
+      lessonCompleted: false,
+    }
+  }
+}
+
+const onContentMeta = (meta: { quizCount: number; exerciseCount: number }, msg: any) => {
+  // 记录练习数，用于完成判定
+  pendingExerciseCount.value = meta.exerciseCount
+}
+const onExerciseSubmitted = (result: { feedback: string }) => {
+  completedExerciseCount.value++
+  
+  // 所有练习完成 & 选择题已通过 → 完成课程
+  if (completedExerciseCount.value >= pendingExerciseCount.value && learningContext.value) {
+    if (completionData.value?.passed && !completionData.value.lessonCompleted) {
+      checkLessonComplete({
+        correct: completionData.value.correct,
+        total: completionData.value.total,
+      })
+    }
+    const lastMsg = messages.value[messages.value.length - 1]
+    if (lastMsg) saveSession(lastMsg.content)
+  }
+}
+
+const onExerciseDetected = (data: { code: string; language: string }) => {
+  currentExercise.value = {
+    code: data.code,
+    language: data.language,
+    lessonId: learningContext.value?.lesson_id || null,
+  }
+}
+
+const goNextLesson = () => {
+  // Navigate to learning page
+  completionData.value = null
+  window.location.hash = '#/learning'
 }
 </script>
 
@@ -619,4 +863,89 @@ const checkPendingMessage = () => {
   color: #999;
   text-align: center;
 }
+
+/* Session banner */
+.session-banner {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  animation: slideUp 0.3s ease;
+}
+
+.session-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.session-banner-icon { font-size: 24px; }
+
+.session-banner-text { flex: 1; }
+
+.session-banner-text p { margin: 0; color: white; font-size: 14px; line-height: 1.5; }
+
+.session-dismiss {
+  background: none; border: none; color: rgba(255,255,255,0.6);
+  font-size: 18px; cursor: pointer; padding: 4px;
+}
+
+.session-dismiss:hover { color: white; }
+
+/* Mastered button */
+.mastered-section { margin-top: 8px; text-align: right; }
+
+.mastered-btn {
+  padding: 8px 20px; background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+  color: white; border: none; border-radius: 20px; cursor: pointer;
+  font-size: 14px; font-weight: 500; transition: all 0.2s;
+}
+
+.mastered-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(82, 196, 26, 0.4); }
+
+.mastered-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Completion banner */
+.completion-banner {
+  border-radius: 12px; padding: 16px 20px; margin: 0 24px 8px; animation: fadeIn 0.3s;
+  flex-shrink: 0;
+}
+
+.completion-banner.pass { background: linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%); border: 1px solid #b7eb8f; }
+
+.completion-banner.fail { background: linear-gradient(135deg, #fff2f0 0%, #ffccc7 100%); border: 1px solid #ffccc7; }
+
+.completion-content { display: flex; align-items: center; gap: 12px; }
+
+.completion-icon { font-size: 28px; }
+
+.completion-text { flex: 1; }
+
+.completion-text p { margin: 0; font-size: 14px; color: #333; line-height: 1.5; }
+
+.completion-text .lesson-complete { color: #52c41a; font-weight: 600; margin-top: 4px; }
+
+/* Button utilities */
+.btn { padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; border: none; display: inline-flex; align-items: center; gap: 6px; }
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white; border: none; border-radius: 8px; cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+
+.btn-outline {
+  background: transparent; color: #667eea; border: 1px solid #667eea;
+  border-radius: 8px; cursor: pointer; transition: all 0.2s;
+}
+
+.btn-outline:hover { background: rgba(102, 126, 234, 0.05); }
+
+/* Animations */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+@keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 </style>
