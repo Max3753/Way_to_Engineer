@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 from ..models.learning import (
     LearningPath, LearningPathData, LearningModule, LearningLesson, ModuleStatus
 )
@@ -461,3 +461,49 @@ def get_all_paths() -> List[LearningPathData]:
     for p in paths:
         _inject_lesson_content(p)
     return paths
+
+
+def find_next_lesson(path_type: str, current_lesson_id: str, completed_lessons: List[str]) -> Optional[Dict]:
+    """根据当前课程，找到路径中下一个未完成的课程
+    
+    Args:
+        path_type: 路径类型 ('frontend' / 'backend' / 'fullstack')
+        current_lesson_id: 当前课程的 lesson_id
+        completed_lessons: 已完成的 lesson_id 列表
+    
+    Returns:
+        下一个课程的 {title, description, id} 或 None
+    """
+    try:
+        path_enum = LearningPath(path_type)
+        path_data = get_learning_path(path_enum)
+    except Exception:
+        return None
+
+    # 扁平化所有课程（保持顺序）
+    all_lessons: List[Dict] = []
+    for module in path_data.modules:
+        for lesson in module.lessons:
+            all_lessons.append({
+                "id": lesson.id,
+                "title": lesson.title,
+                "description": lesson.description,
+                "module_title": module.title,
+            })
+
+    # 找到当前课程在列表中的位置
+    current_idx = None
+    for i, l in enumerate(all_lessons):
+        if l["id"] == current_lesson_id:
+            current_idx = i
+            break
+
+    if current_idx is None:
+        return None
+
+    # 从当前课程之后找第一个未完成的
+    for i in range(current_idx + 1, len(all_lessons)):
+        if all_lessons[i]["id"] not in completed_lessons:
+            return all_lessons[i]
+
+    return None

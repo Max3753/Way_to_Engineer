@@ -65,6 +65,20 @@ print("Hello, World!")
 - 题目难度要匹配当前讲解的内容
 - 解析要详细，让用户即使答错也能学到东西
 
+**下一步学习建议：**
+在课程内容的结尾（出测验题之前），如果有 `[下一课程]` 信息，请用**具体、可操作**的引导：
+- 直接告诉用户下一节课的具体名称和内容
+- 例如："下一节是《Flexbox布局》，你会学到弹性盒子的完整用法"
+- 不要笼统地说"继续学习更多技术"或列举大方向
+- 如果没有 `[下一课程]` 信息，才使用通用的学习建议
+
+**测验生成指令：**
+当用户说"已完成学习"或"出测验题"时，请生成 2-3 道题目：
+- 至少 1 道选择题（使用 ```quiz 格式）
+- 至少 1 道代码题（让用户写代码或预测输出）
+- 题目难度匹配用户当前水平
+- 选择题的 correct 用索引（从 0 开始）
+
 **当前状态：**
 用户正在学习编程，希望从基础进阶到软件工程师水平。
 """
@@ -121,6 +135,13 @@ class TutorAgent:
         recommended_module = context.get("recommended_module")
         if recommended_module:
             context_parts.append(f"[推荐从模块 {recommended_module} 开始]")
+        
+        # 下一课程信息
+        next_lesson = context.get("next_lesson")
+        if next_lesson:
+            context_parts.append(
+                f"[下一课程: {next_lesson['title']} - {next_lesson['description']}]"
+            )
         
         # 学习路径
         path_type = context.get("path_type")
