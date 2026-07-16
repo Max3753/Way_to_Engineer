@@ -17,9 +17,20 @@
     <!-- Code -->
     <pre class="cr-code"><code v-html="highlightedCode"></code></pre>
 
-    <!-- Output -->
+    <!-- Iframe preview for HTML/CSS -->
     <Transition name="slide">
-      <div v-if="output !== null" class="cr-output" :class="{ error: !success }">
+      <div v-if="isHtmlLike && iframeSrc !== null" class="cr-output cr-iframe-output">
+        <div class="output-header">
+          <span class="output-label">✓ 预览</span>
+          <button class="output-close" @click="iframeSrc = null">✕</button>
+        </div>
+        <iframe class="preview-iframe" :srcdoc="iframeSrc" sandbox="allow-scripts"></iframe>
+      </div>
+    </Transition>
+
+    <!-- Output for backend-executed languages -->
+    <Transition name="slide">
+      <div v-if="!isHtmlLike && output !== null" class="cr-output" :class="{ error: !success }">
         <div class="output-header">
           <span class="output-label">{{ success ? '✓ 输出' : '✗ 错误' }}</span>
           <button class="output-close" @click="output = null">✕</button>
@@ -45,6 +56,9 @@ const props = withDefaults(defineProps<{
 const running = ref(false)
 const output = ref<string | null>(null)
 const success = ref(true)
+const iframeSrc = ref<string | null>(null)
+
+const isHtmlLike = computed(() => props.language === 'html' || props.language === 'css')
 
 const highlightedCode = computed(() => {
   try {
@@ -68,7 +82,31 @@ async function runCode() {
   if (running.value) return
   running.value = true
   output.value = null
+  iframeSrc.value = null
 
+  // HTML/CSS: render in iframe directly (no backend call)
+  if (isHtmlLike.value) {
+    if (props.language === 'html') {
+      iframeSrc.value = props.code
+    } else if (props.language === 'css') {
+      iframeSrc.value = `<!DOCTYPE html>
+<html>
+<head>
+  <style>${props.code}</style>
+</head>
+<body>
+  <div class="preview-content" style="font-family:sans-serif;padding:20px;">
+    <h1>CSS 预览</h1>
+    <p>你的样式已应用到此页面。</p>
+  </div>
+</body>
+</html>`
+    }
+    running.value = false
+    return
+  }
+
+  // Backend execution for other languages
   try {
     const res = await axios.post('/api/code/execute', {
       code: props.code,
@@ -221,6 +259,19 @@ async function runCode() {
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* Iframe output */
+.cr-iframe-output {
+  padding: 0;
+}
+
+.preview-iframe {
+  width: 100%;
+  min-height: 300px;
+  border: none;
+  background: #fff;
+  display: block;
 }
 
 /* Transition */

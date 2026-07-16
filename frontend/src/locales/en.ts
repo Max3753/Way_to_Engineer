@@ -141,6 +141,13 @@ export default {
     clear: 'Clear',
     placeholder: 'Click "Run" to execute code...',
     defaultCode: '# Write Python code here\n# Press Ctrl+Enter or click "Run"\n\ndef greet(name):\n    """Greeting function"""\n    return f"Hello, {name}!"\n\n# Call the function\nmessage = greet("World")\nprint(message)\n\n# List comprehension\nsquares = [x**2 for x in range(10)]\nprint(f"Squares: {squares}")',
+    submitFeedback: 'Submit for Review',
+    submitting: 'Submitting...',
+    feedbackTitle: 'AI Review Feedback',
+    feedbackError: 'Failed to get feedback. Please try again.',
+    languageLabel: 'Language:',
+    preview: 'Preview',
+    previewing: 'Rendering...',
   },
 
   // ===== helpers.ts (runtime translations) =====

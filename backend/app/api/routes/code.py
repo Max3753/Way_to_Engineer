@@ -51,17 +51,7 @@ class CodeSubmitResponse(BaseModel):
 async def execute_code(request: CodeRequest):
     """执行代码"""
     executor = get_executor()
-    
-    # 目前只支持Python
-    if request.language != "python":
-        return CodeResponse(
-            success=False,
-            output="",
-            error=f"暂不支持{request.language}，目前只支持Python",
-            exit_code=-1,
-        )
-    
-    result = executor.execute(request.code)
+    result = executor.execute(request.code, request.language)
     
     return CodeResponse(
         success=result["success"],

@@ -92,14 +92,14 @@ function autoWrapDetails(md: string): string {
     const b = s.body.join('\n').trim()
     if (!b) return s.h ? `## ${s.h}` : ''
     return s.h
-      ? `<details class="md-collapse" ${i === 0 ? 'open' : ''} open>\n<summary>${s.h}</summary>\n\n${b}\n\n</details>`
+      ? `<details class="md-collapse">\n<summary>${s.h}</summary>\n\n${b}\n\n</details>`
       : b
   }).filter(Boolean).join('\n\n')
 }
 
 // ── extract ```quiz and ```python blocks ──
 const QUIZ_RE = /```quiz\s*\n([\s\S]*?)```/g
-const CODE_RE = /```(python|javascript|typescript|bash|sh)\s*\n([\s\S]*?)```/g
+const CODE_RE = /```(python|javascript|typescript|html|css|bash|sh)\s*\n([\s\S]*?)```/g
 
 interface ExtractedCode { index: number; code: string; language: string; fullMatch: string }
 

@@ -145,6 +145,9 @@ export default {
     submitting: '反馈中...',
     feedbackTitle: 'AI 练习反馈',
     feedbackError: '获取反馈失败，请重试',
+    languageLabel: '语言:',
+    preview: '预览',
+    previewing: '渲染中...',
   },
 
   // ===== helpers.ts (runtime translations) =====

@@ -2,31 +2,43 @@
   <div class="code-editor">
     <div class="editor-header">
       <div class="tabs">
-        <span class="tab active">main.py</span>
+        <select v-model="selectedLanguage" class="lang-select" @change="onLanguageChange">
+          <option v-for="lang in languages" :key="lang.id" :value="lang.id">
+            {{ lang.label }}
+          </option>
+        </select>
+        <span class="tab active">{{ currentTab }}</span>
       </div>
       <div class="header-actions">
         <button class="submit-btn" @click="submitForReview" :disabled="submitting">
           {{ submitting ? langStore.t('codeEditor.submitting') : langStore.t('codeEditor.submitFeedback') }}
         </button>
         <button class="run-btn" @click="runCode" :disabled="running">
-          <span v-if="!running">{{ langStore.t('codeEditor.run') }}</span>
-          <span v-else>{{ langStore.t('codeEditor.running') }}</span>
+          <span v-if="!running">{{ currentExecutor === 'iframe' ? 'Preview' : langStore.t('codeEditor.run') }}</span>
+          <span v-else>{{ currentExecutor === 'iframe' ? 'Loading...' : langStore.t('codeEditor.running') }}</span>
         </button>
       </div>
     </div>
     
     <div class="editor-container" ref="editorContainer"></div>
     
-    <div class="output-panel">
+    <div class="output-panel" :class="{ 'iframe-mode': currentExecutor === 'iframe' }">
       <div class="output-header">
-        <span class="output-title">{{ hasError ? langStore.t('codeEditor.error') : langStore.t('codeEditor.output') }}</span>
-        <button class="clear-btn" @click="clearOutput" v-if="output || error">{{ langStore.t('codeEditor.clear') }}</button>
+        <span class="output-title">{{ hasError ? langStore.t('codeEditor.error') : (currentExecutor === 'iframe' ? 'Preview' : langStore.t('codeEditor.output')) }}</span>
+        <button class="clear-btn" @click="clearOutput" v-if="output || error || previewSrc">{{ langStore.t('codeEditor.clear') }}</button>
       </div>
-      <div class="output-content">
+
+      <!-- iframe preview for HTML/CSS -->
+      <div v-if="previewSrc" class="output-content preview-content">
+        <iframe :srcdoc="previewSrc" sandbox="allow-scripts" class="preview-iframe" />
+      </div>
+
+      <!-- normal output panel -->
+      <div v-else class="output-content">
         <pre v-if="output" class="output-text">{{ output }}</pre>
         <pre v-if="error" class="error-text">{{ error }}</pre>
         <div v-if="!output && !error && !feedback" class="output-placeholder">
-          {{ langStore.t('codeEditor.placeholder') }}
+          {{ currentExecutor === 'iframe' ? 'Click "Preview" to render your code.' : langStore.t('codeEditor.placeholder') }}
         </div>
       </div>
       
@@ -48,37 +60,114 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import loader from '@monaco-editor/loader'
 import { useLangStore } from '../stores/langStore'
 import { useAuthStore } from '../stores/authStore'
 
+// ── Types ──────────────────────────────────────────────────────────────
+
+interface LangConfig {
+  id: string
+  label: string
+  monaco: string
+  tab: string
+  executor: 'backend' | 'iframe'
+  defaultCode: string
+}
+
+// ── Language definitions ───────────────────────────────────────────────
+
+const languages: LangConfig[] = [
+  {
+    id: 'python',
+    label: 'Python',
+    monaco: 'python',
+    tab: 'main.py',
+    executor: 'backend',
+    defaultCode: '# Write Python code here\nprint("Hello World!")',
+  },
+  {
+    id: 'javascript',
+    label: 'JavaScript',
+    monaco: 'javascript',
+    tab: 'script.js',
+    executor: 'backend',
+    defaultCode: '// Write JavaScript code here\nconsole.log("Hello World!");',
+  },
+  {
+    id: 'typescript',
+    label: 'TypeScript',
+    monaco: 'typescript',
+    tab: 'index.ts',
+    executor: 'backend',
+    defaultCode:
+      '// Write TypeScript code here\nconst msg: string = "Hello World!";\nconsole.log(msg);',
+  },
+  {
+    id: 'html',
+    label: 'HTML',
+    monaco: 'html',
+    tab: 'index.html',
+    executor: 'iframe',
+    defaultCode:
+      '<!DOCTYPE html>\n<html>\n<head>\n  <title>My Page</title>\n  <style>\n    body { font-family: sans-serif; padding: 20px; }\n  </style>\n</head>\n<body>\n  <h1>Hello World!</h1>\n  <p>Write your HTML here.</p>\n</body>\n</html>',
+  },
+  {
+    id: 'css',
+    label: 'CSS',
+    monaco: 'css',
+    tab: 'style.css',
+    executor: 'iframe',
+    defaultCode:
+      '/* Write CSS code here */\nbody {\n  font-family: sans-serif;\n  background: #f0f0f0;\n  margin: 20px;\n}',
+  },
+  {
+    id: 'bash',
+    label: 'Bash',
+    monaco: 'shell',
+    tab: 'script.sh',
+    executor: 'backend',
+    defaultCode: '# Write shell commands here\necho "Hello World!"',
+  },
+]
+
+// ── State ──────────────────────────────────────────────────────────────
+
 const editorContainer = ref<HTMLElement>()
 const output = ref('')
 const error = ref('')
+const previewSrc = ref('')
 const running = ref(false)
 const submitting = ref(false)
 const feedback = ref('')
 const feedbackError = ref('')
+const selectedLanguage = ref('python')
 const langStore = useLangStore()
 const authStore = useAuthStore()
 
 let editor: any = null
 let monaco: any = null
 
+// ── Computed ───────────────────────────────────────────────────────────
+
+const currentLangConfig = computed((): LangConfig => {
+  return languages.find((l) => l.id === selectedLanguage.value) || languages[0]
+})
+
+const currentTab = computed(() => currentLangConfig.value.tab)
+const currentExecutor = computed(() => currentLangConfig.value.executor)
 const hasError = computed(() => !!error.value)
 
-const defaultCode = computed(() => langStore.t('codeEditor.defaultCode'))
+// ── Lifecycle ──────────────────────────────────────────────────────────
 
 onMounted(async () => {
-  // 加载Monaco Editor
   monaco = await loader.init()
-  
-  // 创建编辑器
+
   editor = monaco.editor.create(editorContainer.value!, {
-    value: defaultCode.value,
-    language: 'python',
+    value: currentLangConfig.value.defaultCode,
+    language: currentLangConfig.value.monaco,
     theme: 'vs-dark',
     automaticLayout: true,
     fontSize: 14,
@@ -97,8 +186,8 @@ onMounted(async () => {
     tabSize: 4,
     insertSpaces: true,
   })
-  
-  // Ctrl+Enter 执行代码
+
+  // Ctrl+Enter execute
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
     runCode()
   })
@@ -110,27 +199,56 @@ onBeforeUnmount(() => {
   }
 })
 
+// ── Language switching ─────────────────────────────────────────────────
+
+function onLanguageChange() {
+  const cfg = currentLangConfig.value
+
+  if (editor && monaco) {
+    const model = editor.getModel()
+    if (model) {
+      monaco.editor.setModelLanguage(model, cfg.monaco)
+    }
+    editor.setValue(cfg.defaultCode)
+  }
+
+  clearOutput()
+}
+
+// ── Run / Preview ──────────────────────────────────────────────────────
+
 const runCode = async () => {
   if (running.value || !editor) return
-  
+
   const code = editor.getValue()
   if (!code.trim()) return
-  
+
   running.value = true
   output.value = ''
   error.value = ''
   feedback.value = ''
   feedbackError.value = ''
-  
+  previewSrc.value = ''
+
   try {
-    const response = await axios.post('/api/code/execute', {
-      code: code,
-      language: 'python',
-    })
-    
-    const result = response.data
-    output.value = result.output
-    error.value = result.error
+    if (currentExecutor.value === 'iframe') {
+      // HTML: render directly; CSS: wrap in a minimal HTML shell
+      if (selectedLanguage.value === 'css') {
+        previewSrc.value =
+          "<html><head><style>" + code + "</style></head><body><div class='preview-content'>Preview your styles here</div></body></html>"
+      } else {
+        previewSrc.value = code
+      }
+    } else {
+      const response = await axios.post('/api/code/execute', {
+        code: code,
+        language: selectedLanguage.value,
+      })
+
+      const result = response.data
+      output.value = result.output
+      error.value = result.error
+    }
   } catch (err: any) {
     error.value = err.response?.data?.detail || '请求失败'
   } finally {
@@ -138,38 +256,44 @@ const runCode = async () => {
   }
 }
 
+// ── Submit for review ──────────────────────────────────────────────────
+
 const submitForReview = async () => {
   if (submitting.value || !editor) return
-  
+
   const code = editor.getValue()
   if (!code.trim()) return
-  
+
   submitting.value = true
   feedback.value = ''
   feedbackError.value = ''
-  
+
   try {
     const response = await axios.post('/api/code/submit', {
       code: code,
-      language: 'python',
+      language: selectedLanguage.value,
       output: output.value,
       error: error.value,
       success: !error.value,
       exit_code: error.value ? 1 : 0,
       user_id: authStore.userId || 'default',
     })
-    
+
     feedback.value = response.data.feedback
   } catch (err: any) {
-    feedbackError.value = err.response?.data?.detail || langStore.t('codeEditor.feedbackError')
+    feedbackError.value =
+      err.response?.data?.detail || langStore.t('codeEditor.feedbackError')
   } finally {
     submitting.value = false
   }
 }
 
+// ── Utilities ──────────────────────────────────────────────────────────
+
 const clearOutput = () => {
   output.value = ''
   error.value = ''
+  previewSrc.value = ''
   feedback.value = ''
   feedbackError.value = ''
 }
@@ -204,7 +328,28 @@ const clearOutput = () => {
 
 .tabs {
   display: flex;
-  gap: 2px;
+  gap: 8px;
+  align-items: center;
+}
+
+.lang-select {
+  background: #3c3c3c;
+  color: #fff;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+
+.lang-select:hover {
+  background: #4a4a4a;
+}
+
+.lang-select option {
+  background: #3c3c3c;
+  color: #fff;
 }
 
 .tab {
@@ -282,6 +427,10 @@ const clearOutput = () => {
   overflow-y: auto;
 }
 
+.output-panel.iframe-mode {
+  max-height: none;
+}
+
 .output-header {
   display: flex;
   justify-content: space-between;
@@ -317,6 +466,19 @@ const clearOutput = () => {
   max-height: 200px;
   overflow-y: auto;
   padding: 12px;
+}
+
+.preview-content {
+  max-height: none;
+  overflow: visible;
+}
+
+.preview-iframe {
+  width: 100%;
+  min-height: 300px;
+  border: none;
+  background: #fff;
+  border-radius: 4px;
 }
 
 .output-text, .error-text {

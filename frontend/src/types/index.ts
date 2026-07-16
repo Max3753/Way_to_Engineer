@@ -12,6 +12,7 @@ export interface Lesson {
   type: string
   duration_minutes: number
   is_completed: boolean
+  language?: string
 }
 
 export interface Module {
