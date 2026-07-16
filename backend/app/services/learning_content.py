@@ -489,6 +489,7 @@ def find_next_lesson(path_type: str, current_lesson_id: str, completed_lessons: 
                 "title": lesson.title,
                 "description": lesson.description,
                 "module_title": module.title,
+                "module_id": module.id,
             })
 
     # 找到当前课程在列表中的位置

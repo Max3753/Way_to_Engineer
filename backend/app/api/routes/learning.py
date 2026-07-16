@@ -6,7 +6,7 @@ from ...models.learning import (
     LearningPath, UserProgress, LearningPathData, CoachResponse,
     CoachRecommendation, ModuleStatus
 )
-from ...services.learning_content import get_learning_path, get_all_paths
+from ...services.learning_content import get_learning_path, get_all_paths, find_next_lesson
 from ...services.data_store import data_store
 from ...services.gamification_service import get_gamification_service
 
@@ -138,11 +138,21 @@ async def complete_lesson(lesson_id: str, user_id: str = Query("default")):
         xp_awarded = 10
         profile, new_badges = svc.award_xp(user_id, xp_awarded, f"完成课程: {lesson_id}")
     
+    # 查找下一课程（用于前端自动跳转）
+    next_lesson = None
+    if progress.current_path and is_new:
+        next_lesson = find_next_lesson(
+            path_type=progress.current_path.value,
+            current_lesson_id=lesson_id,
+            completed_lessons=progress.completed_lessons,
+        )
+    
     return {
         "message": "课程已标记完成",
         "progress": progress,
         "xp_awarded": xp_awarded,
         "new_badges": new_badges,
+        "next_lesson": next_lesson,
     }
 
 
