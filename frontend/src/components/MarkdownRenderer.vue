@@ -135,14 +135,35 @@ const contentBlocks = computed(() => {
   let m: RegExpExecArray | null
   while ((m = QUIZ_RE.exec(md)) !== null) {
     try {
-      const d = JSON.parse(m[1].trim())
+      const raw = m[1].trim()
+      const d = JSON.parse(raw)
+      // validate + fallback: accept quizes even with partial data
+      const hasQuestion = typeof d.question === 'string' && d.question.trim().length > 0
+      const hasOptions = Array.isArray(d.options) && d.options.length >= 2
+      const hasCorrect = typeof d.correct === 'number' && !Number.isNaN(d.correct)
+      const hasExplanation = typeof d.explanation === 'string' && d.explanation.trim().length > 0
+      if (!hasQuestion || !hasOptions) {
+        // missing essential fields -> skip, renders as plain text
+        continue
+      }
+      // clamp correct index to valid range
+      let correctIdx = hasCorrect ? Math.round(d.correct) : 0
+      if (correctIdx < 0 || correctIdx >= d.options.length) {
+        correctIdx = 0
+      }
       quizBlocks.push({
         start: m.index,
         end: m.index + m[0].length,
-        data: { question: d.question, options: d.options, correct: d.correct ?? 0, explanation: d.explanation },
+        data: {
+          question: d.question.trim(),
+          options: d.options,
+          correct: correctIdx,
+          explanation: hasExplanation ? d.explanation.trim() : '',
+          code: typeof d.code === 'string' ? d.code.trim() : undefined,
+        },
       })
     } catch {
-      // parse failed, leave as-is
+      // parse failed, leave as-is (renders as plain markdown)
     }
   }
 

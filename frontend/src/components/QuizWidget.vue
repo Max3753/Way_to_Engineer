@@ -7,6 +7,9 @@
       </span>
     </div>
 
+    <div v-if="data.code" class="quiz-code-block">
+      <pre><code>{{ data.code }}</code></pre>
+    </div>
     <p class="quiz-question">{{ data.question }}</p>
 
     <div class="quiz-options">
@@ -50,6 +53,7 @@ export interface QuizData {
   options: string[]
   correct: number
   explanation: string
+  code?: string
 }
 
 const props = defineProps<{
@@ -129,6 +133,27 @@ const selectOption = (index: number) => {
 .quiz-result.wrong {
   color: #ff4d4f;
   background: rgba(255, 77, 79, 0.1);
+}
+
+.quiz-code-block {
+  margin: 0 0 12px 0;
+  background: #1e1e1e;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.quiz-code-block pre {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+
+.quiz-code-block code {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #d4d4d4;
+  white-space: pre;
 }
 
 .quiz-question {
