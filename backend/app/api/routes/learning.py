@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from ...models.learning import (
@@ -278,3 +279,35 @@ async def save_ai_plan(data: dict, user_id: str = Query("default")):
     progress.learning_plan = plan_text
     save_user_progress(progress)
     return {"message": "学习计划已保存"}
+
+
+class SessionUpdate(BaseModel):
+    lesson_id: Optional[str] = None
+    module_id: Optional[str] = None
+    lesson_title: Optional[str] = None
+    module_title: Optional[str] = None
+    path_type: Optional[str] = None
+    last_reply_summary: Optional[str] = None
+
+
+@router.get("/session")
+async def get_session(user_id: str = Query("default")):
+    """获取用户最近的会话数据"""
+    progress = get_user_progress(user_id)
+    return {"session": progress.last_session or None}
+
+
+@router.post("/session")
+async def save_session(update: SessionUpdate, user_id: str = Query("default"), clear: bool = Query(False)):
+    """保存/更新用户会话数据。clear=true 则清除会话"""
+    progress = get_user_progress(user_id)
+    if clear:
+        progress.last_session = None
+        save_user_progress(progress)
+        return {"message": "ok", "session": None}
+    if progress.last_session is None:
+        progress.last_session = {}
+    update_data = update.model_dump(exclude_unset=True)
+    progress.last_session.update(update_data)
+    save_user_progress(progress)
+    return {"message": "ok", "session": progress.last_session}

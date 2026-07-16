@@ -82,6 +82,7 @@ class UserProgress(BaseModel):
     assessments: List[AssessmentResult] = []  # 测试结果历史
     skill_levels: Dict[str, float] = {}  # 各分类水平 0-100
     learning_plan: Optional[str] = None  # AI生成的个性化学习计划
+    last_session: Optional[dict] = None  # 用户最近的会话数据
 
 
 class CodeSubmission(BaseModel):
