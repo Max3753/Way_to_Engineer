@@ -3,18 +3,14 @@
     <!-- Header -->
     <div class="cr-header">
       <span class="cr-lang">{{ language }}</span>
-      <button
-        class="cr-run-btn"
-        :disabled="running"
-        @click="runCode"
-      >
+      <button class="cr-run-btn" :disabled="running" @click="runCode">
         <span v-if="!running" class="run-icon">▶</span>
         <span v-else class="spinner"></span>
         {{ running ? '运行中...' : '运行' }}
       </button>
     </div>
 
-    <!-- Code -->
+    <!-- Code: highlighted read-only -->
     <pre class="cr-code"><code v-html="highlightedCode"></code></pre>
 
     <!-- Iframe preview for HTML/CSS -->

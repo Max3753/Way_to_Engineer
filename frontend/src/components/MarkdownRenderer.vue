@@ -11,13 +11,25 @@
         :code="block.code"
         :language="block.language"
       />
+      <div v-else-if="block.type === 'exercise'" class="exercise-card">
+        <div class="ec-header">
+          <span class="ec-lang">{{ block.language }}</span>
+          <span class="ec-badge">📝 代码练习</span>
+        </div>
+        <pre class="ec-preview"><code>{{ block.code }}</code></pre>
+        <div class="ec-actions">
+          <button class="ec-open-btn" @click="$emit('exerciseDetected', { code: block.code, language: block.language })">
+            📂 在编辑器中打开
+          </button>
+        </div>
+      </div>
       <div v-else class="markdown-body" v-html="block.html"></div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
@@ -67,8 +79,9 @@ marked.use({ renderer })
 // ── types ──
 interface QuizBlock { type: 'quiz'; data: { question: string; options: string[]; correct: number; explanation: string } }
 interface CodeBlock { type: 'code'; code: string; language: string }
+interface ExerciseBlock { type: 'exercise'; code: string; language: string }
 interface HtmlBlock { type: 'html'; html: string }
-type ContentBlock = HtmlBlock | QuizBlock | CodeBlock
+type ContentBlock = HtmlBlock | QuizBlock | CodeBlock | ExerciseBlock
 
 // ── auto-wrap ## headings into <details> ──
 function autoWrapDetails(md: string): string {
@@ -97,8 +110,9 @@ function autoWrapDetails(md: string): string {
   }).filter(Boolean).join('\n\n')
 }
 
-// ── extract ```quiz and ```python blocks ──
+// ── extract ```quiz / ```exercise:lang / ```lang blocks ──
 const QUIZ_RE = /```quiz\s*\n([\s\S]*?)```/g
+const EXERCISE_RE = /```exercise:(\w+)\s*\n([\s\S]*?)```/g
 const CODE_RE = /```(python|javascript|typescript|html|css|bash|sh)\s*\n([\s\S]*?)```/g
 
 interface ExtractedCode { index: number; code: string; language: string; fullMatch: string }
@@ -132,13 +146,29 @@ const contentBlocks = computed(() => {
     }
   }
 
-  // ---- Step 2: Extract runnable code blocks ----
-  const codeBlocks: { start: number; end: number; code: string; language: string }[] = []
-  CODE_RE.lastIndex = 0
-  while ((m = CODE_RE.exec(md)) !== null) {
-    // Skip if inside a quiz block
+  // ---- Step 2: Extract exercise code blocks (editable + submit) ----
+  const exerciseBlocks: { start: number; end: number; code: string; language: string }[] = []
+  EXERCISE_RE.lastIndex = 0
+  while ((m = EXERCISE_RE.exec(md)) !== null) {
     const insideQuiz = quizBlocks.some(q => m!.index >= q.start && m!.index < q.end)
     if (!insideQuiz) {
+      exerciseBlocks.push({
+        start: m.index,
+        end: m.index + m[0].length,
+        code: m[2].trim(),
+        language: m[1],
+      })
+    }
+  }
+
+  // ---- Step 3: Extract runnable code blocks ----
+  const codeBlocks: { start: number; end: number; code: string; language: string; exercise?: boolean }[] = []
+  CODE_RE.lastIndex = 0
+  while ((m = CODE_RE.exec(md)) !== null) {
+    // Skip if inside a quiz or exercise block
+    const insideQuiz = quizBlocks.some(q => m!.index >= q.start && m!.index < q.end)
+    const insideExercise = exerciseBlocks.some(e => m!.index >= e.start && m!.index < e.end)
+    if (!insideQuiz && !insideExercise) {
       codeBlocks.push({
         start: m.index,
         end: m.index + m[0].length,
@@ -148,9 +178,10 @@ const contentBlocks = computed(() => {
     }
   }
 
-  // ---- Step 3: Merge all regions and split into segments ----
+  // ---- Step 4: Merge all regions and split into segments ----
   const regions: { start: number; end: number; type: string; data?: any }[] = [
     ...quizBlocks.map(q => ({ start: q.start, end: q.end, type: 'quiz', data: q.data })),
+    ...exerciseBlocks.map(c => ({ start: c.start, end: c.end, type: 'exercise', data: { code: c.code, language: c.language } })),
     ...codeBlocks.map(c => ({ start: c.start, end: c.end, type: 'code', data: { code: c.code, language: c.language } })),
   ].sort((a, b) => a.start - b.start)
 
@@ -169,6 +200,8 @@ const contentBlocks = computed(() => {
       blocks.push({ type: 'quiz', data: region.data })
     } else if (region.type === 'code') {
       blocks.push({ type: 'code', code: region.data.code, language: region.data.language })
+    } else if (region.type === 'exercise') {
+      blocks.push({ type: 'exercise', code: region.data.code, language: region.data.language })
     }
     cursor = region.end
   }
@@ -185,8 +218,37 @@ const contentBlocks = computed(() => {
   return blocks
 })
 
-function onQuizAnswer(_i: number, _correct: boolean) {
-  // future: track answers for score summary
+const emit = defineEmits<{
+  quizResult: [result: { total: number; correct: number }]
+  exerciseDetected: [data: { code: string; language: string }]
+  contentMeta: [meta: { quizCount: number; exerciseCount: number }]
+}>()
+
+const quizResults = reactive<Record<number, boolean>>({})
+
+// Reset tracking when content changes (new agent response)
+watch(() => props.content, (newContent) => {
+  for (const key of Object.keys(quizResults)) {
+    delete quizResults[key]
+  }
+  
+  // Emit content meta for quiz/exercise tracking
+  if (newContent) {
+    const quizCount = (newContent.match(/```quiz\s*\n/g) || []).length
+    const exerciseCount = (newContent.match(/```exercise:\w+\s*\n/g) || []).length
+    emit('contentMeta', { quizCount, exerciseCount })
+  }
+}, { immediate: true })
+
+function onQuizAnswer(index: number, correct: boolean) {
+  quizResults[index] = correct
+
+  const total = contentBlocks.value.filter(b => b.type === 'quiz').length
+  const answered = Object.keys(quizResults).length
+  if (answered >= total && total > 0) {
+    const correctCount = Object.values(quizResults).filter(Boolean).length
+    emit('quizResult', { total, correct: correctCount })
+  }
 }
 </script>
 
@@ -242,4 +304,73 @@ function onQuizAnswer(_i: number, _correct: boolean) {
 .markdown-body :deep(details.md-collapse > :not(summary)) { padding: 0 14px 10px 30px; animation: fade-in .25s ease; }
 @keyframes fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 .markdown-body :deep(details.md-collapse:first-of-type) { border-color: #d0d5e0; background: #fff; }
+
+/* Exercise Card */
+.exercise-card {
+  margin: 12px 0;
+  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fafbfc;
+}
+.ec-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #f0f2f5;
+  border-bottom: 1px solid #e4e7ed;
+}
+.ec-lang {
+  font-size: 11px;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ec-badge {
+  font-size: 12px;
+  color: #667eea;
+  font-weight: 500;
+}
+.ec-preview {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  background: #1e1e1e;
+  color: #c9d1d9;
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: 'SF Mono','Fira Code','Cascadia Code',Consolas,monospace;
+}
+.ec-preview code {
+  font-family: inherit;
+  white-space: pre;
+}
+.ec-actions {
+  padding: 8px 14px;
+  background: #fafbfc;
+  border-top: 1px solid #e4e7ed;
+  display: flex;
+  gap: 8px;
+}
+.ec-open-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  background: #667eea;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.ec-open-btn:hover {
+  background: #5a6fd6;
+  transform: translateY(-1px);
+}
 </style>

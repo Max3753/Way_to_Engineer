@@ -1,22 +1,24 @@
 <template>
-  <div class="code-editor">
+  <div class="code-editor" :class="{ 'exercise-mode': exerciseData !== null }">
     <div class="editor-header">
       <div class="tabs">
-        <select v-model="selectedLanguage" class="lang-select" @change="onLanguageChange">
+        <select v-model="selectedLanguage" class="lang-select" @change="onLanguageChange" :disabled="exerciseData !== null">
           <option v-for="lang in languages" :key="lang.id" :value="lang.id">
             {{ lang.label }}
           </option>
         </select>
-        <span class="tab active">{{ currentTab }}</span>
+        <span v-if="exerciseData" class="exercise-indicator">📝 练习模式</span>
+        <span v-else class="tab active">{{ currentTab }}</span>
       </div>
       <div class="header-actions">
-        <button class="submit-btn" @click="submitForReview" :disabled="submitting">
-          {{ submitting ? langStore.t('codeEditor.submitting') : langStore.t('codeEditor.submitFeedback') }}
+        <button v-if="exerciseData" class="submit-btn" @click="submitForReview" :disabled="submitting">
+          {{ submitting ? '提交中...' : '📝 提交练习反馈' }}
         </button>
         <button class="run-btn" @click="runCode" :disabled="running">
           <span v-if="!running">{{ currentExecutor === 'iframe' ? 'Preview' : langStore.t('codeEditor.run') }}</span>
           <span v-else>{{ currentExecutor === 'iframe' ? 'Loading...' : langStore.t('codeEditor.running') }}</span>
         </button>
+        <button v-if="exerciseData" class="close-exercise-btn" @click="closeExercise">✕</button>
       </div>
     </div>
     
@@ -60,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import loader from '@monaco-editor/loader'
 import { useLangStore } from '../stores/langStore'
@@ -132,6 +134,20 @@ const languages: LangConfig[] = [
     defaultCode: '# Write shell commands here\necho "Hello World!"',
   },
 ]
+
+// ── Emits ─────────────────────────────────────────────────────────────
+
+const emit = defineEmits<{
+  exerciseSubmitted: [result: { feedback: string }]
+}>()
+
+// ── Props ──────────────────────────────────────────────────────────────
+
+const props = withDefaults(defineProps<{
+  exerciseData?: { code: string; language: string; lessonId?: string | null } | null
+}>(), {
+  exerciseData: null,
+})
 
 // ── State ──────────────────────────────────────────────────────────────
 
@@ -215,6 +231,33 @@ function onLanguageChange() {
   clearOutput()
 }
 
+// ── Exercise mode ──────────────────────────────────────────────────────
+
+watch(() => props.exerciseData, (data) => {
+  if (data && editor && monaco) {
+    // Switch to exercise language
+    const lang = languages.find(l => l.id === data.language)
+    if (lang) {
+      selectedLanguage.value = lang.id
+      const model = editor.getModel()
+      if (model) {
+        monaco.editor.setModelLanguage(model, lang.monaco)
+      }
+    }
+    editor.setValue(data.code)
+    clearOutput()
+  }
+}, { immediate: true })
+
+function closeExercise() {
+  // Restore default code for current language
+  const cfg = currentLangConfig.value
+  if (editor) {
+    editor.setValue(cfg.defaultCode)
+  }
+  clearOutput()
+}
+
 // ── Run / Preview ──────────────────────────────────────────────────────
 
 const runCode = async () => {
@@ -277,9 +320,12 @@ const submitForReview = async () => {
       success: !error.value,
       exit_code: error.value ? 1 : 0,
       user_id: authStore.userId || 'default',
+      lesson_id: props.exerciseData?.lessonId || null,
     })
 
     feedback.value = response.data.feedback
+    // 通知父组件练习已提交
+    emit('exerciseSubmitted', { feedback: response.data.feedback })
   } catch (err: any) {
     feedbackError.value =
       err.response?.data?.detail || langStore.t('codeEditor.feedbackError')
@@ -413,6 +459,39 @@ const clearOutput = () => {
   background: #3c3c3c;
   color: #6c6c6c;
   cursor: not-allowed;
+}
+
+.exercise-indicator {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  background: #667eea;
+  border-radius: 4px;
+  margin-left: 8px;
+}
+
+.close-exercise-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: #969696;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-exercise-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+.exercise-mode .editor-header {
+  border-bottom-color: #667eea;
 }
 
 .editor-container {
