@@ -104,9 +104,10 @@ function autoWrapDetails(md: string): string {
   return secs.map((s, i) => {
     const b = s.body.join('\n').trim()
     if (!b) return s.h ? `## ${s.h}` : ''
-    return s.h
-      ? `<details class="md-collapse">\n<summary>${s.h}</summary>\n\n${b}\n\n</details>`
-      : b
+    if (!s.h) return b
+    // 第一个折叠块默认展开，其余收起
+    const openAttr = i === 0 ? ' open' : ''
+    return `<details class="md-collapse"${openAttr}>\n<summary>${s.h}</summary>\n\n${b}\n\n</details>`
   }).filter(Boolean).join('\n\n')
 }
 
