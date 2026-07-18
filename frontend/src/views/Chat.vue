@@ -746,6 +746,8 @@ const goNextLesson = () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+  flex: 1;
 }
 
 .agent-tag {
@@ -782,8 +784,8 @@ const goNextLesson = () => {
 }
 
 .assistant-bubble {
-  max-width: 100%;
-  overflow: hidden;
+  width: 100%;
+  min-width: 0;
 }
 
 .user-bubble {
