@@ -159,10 +159,10 @@ function inferCorrectFromExplanation(explanation: string, options: string[], llm
       const wrongIdx = wrongLetter.charCodeAt(0) - 65
       if (wrongIdx === 0) {
         // A is explicitly wrong, so correct is not 0. Find right one.
-        // First check if explanation starts with an option's text (strong signal)
+        // Check if explanation starts with an option's text (strong signal)
         for (let i = 1; i < optCount; i++) {
           const optText = options[i].replace(/^[A-D][.、．\s]+/, '').trim()
-          if (optText.length >= 4 && (exp.startsWith(optText) || exp.includes(optText))) {
+          if (optText.length >= 4 && exp.startsWith(optText)) {
             // Verify this option is NOT marked as wrong
             const alsoNeg = new RegExp(`[（(]?${letters[i]}[）)]?\\s*(?:错误|不对|不符合|缺少|不是|缺少引号|报错|描述的是|的行为|是指)`)
             if (!alsoNeg.test(exp)) return i
