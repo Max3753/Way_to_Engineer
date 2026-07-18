@@ -140,14 +140,19 @@ const contentBlocks = computed(() => {
       // validate + fallback: accept quizes even with partial data
       const hasQuestion = typeof d.question === 'string' && d.question.trim().length > 0
       const hasOptions = Array.isArray(d.options) && d.options.length >= 2
-      const hasCorrect = typeof d.correct === 'number' && !Number.isNaN(d.correct)
       const hasExplanation = typeof d.explanation === 'string' && d.explanation.trim().length > 0
       if (!hasQuestion || !hasOptions) {
         // missing essential fields -> skip, renders as plain text
         continue
       }
+      // coerce correct to number (AI sometimes outputs string like "2" instead of 2)
+      let rawCorrect = d.correct
+      if (typeof rawCorrect === 'string') {
+        rawCorrect = Number(rawCorrect)
+      }
+      const hasCorrect = typeof rawCorrect === 'number' && !Number.isNaN(rawCorrect)
       // clamp correct index to valid range
-      let correctIdx = hasCorrect ? Math.round(d.correct) : 0
+      let correctIdx = hasCorrect ? Math.round(rawCorrect) : 0
       if (correctIdx < 0 || correctIdx >= d.options.length) {
         correctIdx = 0
       }

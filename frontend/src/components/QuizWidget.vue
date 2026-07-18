@@ -73,7 +73,9 @@ const selectOption = (index: number) => {
   if (answered.value) return
   selectedIndex.value = index
   answered.value = true
-  isCorrect.value = index === props.data.correct
+  // coerce correct to number (AI sometimes outputs string)
+  const correctIndex = typeof props.data.correct === 'number' ? props.data.correct : Number(props.data.correct)
+  isCorrect.value = index === correctIndex
   emit('answer', isCorrect.value)
 }
 </script>
