@@ -125,6 +125,62 @@ function sanitizeHtml(raw: string): string {
   })
 }
 
+/**
+ * Heuristic: infer correct answer index from quiz explanation text.
+ * LLM often outputs correct=0 due to training data bias, even when
+ * the explanation clearly identifies a different option as correct.
+ * This detects contradictions and explicit mentions to fix the index.
+ */
+function inferCorrectFromExplanation(explanation: string, options: string[], llmCorrect: number): number | null {
+  const letters = ['A', 'B', 'C', 'D']
+  const optCount = options.length
+  const exp = explanation.trim()
+
+  // 1) Explicit positive mention: "X 是正确答案" / "X 正确" / "正确: X" / "选项X"
+  for (let i = 0; i < optCount; i++) {
+    const letter = letters[i]
+    const posPatterns = [
+      new RegExp(`${letter}\\s*(?:是正确答案|正确选项|符合题意|符合|可以|应该选|正确)`),
+      new RegExp(`(?:正确答案|正确选项|应选|选择|推荐)\\s*[:：]?\\s*[（(]?${letter}[）)]?`),
+      new RegExp(`[（(]${letter}[）)]\\s*(?:正确|符合)`),
+    ]
+    for (const pat of posPatterns) {
+      if (pat.test(exp)) return i
+    }
+  }
+
+  // 2) Contradiction: LLM says correct=0 but explanation says A is wrong
+  if (llmCorrect === 0) {
+    // Broader negative detection: include "描述的是...的行为","是指" etc.
+    const negPattern = /[（(]?([A-D])[）)]?\s*(?:错误|不对|不符合|缺少|不是|缺少引号|报错|描述的是|的行为|是指)/
+    const negMatch = exp.match(negPattern)
+    if (negMatch) {
+      const wrongLetter = negMatch[1]
+      const wrongIdx = wrongLetter.charCodeAt(0) - 65
+      if (wrongIdx === 0) {
+        // A is explicitly wrong, so correct is not 0. Find right one.
+        // First check if explanation starts with an option's text (strong signal)
+        for (let i = 1; i < optCount; i++) {
+          const optText = options[i].replace(/^[A-D][.、．\s]+/, '').trim()
+          if (optText.length >= 4 && (exp.startsWith(optText) || exp.includes(optText))) {
+            // Verify this option is NOT marked as wrong
+            const alsoNeg = new RegExp(`[（(]?${letters[i]}[）)]?\\s*(?:错误|不对|不符合|缺少|不是|缺少引号|报错|描述的是|的行为|是指)`)
+            if (!alsoNeg.test(exp)) return i
+          }
+        }
+        // Fallback: find first option not explicitly negated
+        for (let i = 1; i < optCount; i++) {
+          const alsoNeg = new RegExp(`[（(]?${letters[i]}[）)]?\\s*(?:错误|不对|不符合|缺少|不是|缺少引号|报错|描述的是|的行为|是指)`)
+          if (!alsoNeg.test(exp)) return i
+        }
+        return 1
+      }
+    }
+  }
+
+  return null // no override
+}
+
 const contentBlocks = computed(() => {
   const blocks: ContentBlock[] = []
   let md = props.content || ''
@@ -156,6 +212,16 @@ const contentBlocks = computed(() => {
       let correctIdx = hasCorrect ? Math.round(rawCorrect) : 0
       if (correctIdx < 0 || correctIdx >= d.options.length) {
         correctIdx = 0
+      }
+      // ── heuristic: validate correctIdx against explanation ──
+      // LLM often defaults to correct=0 even when answer is elsewhere.
+      // Cross-check: if explanation mentions an option letter as "wrong" but
+      // correctIdx points to it, OR explanation explicitly names the right option, override.
+      if (hasExplanation && d.options.length >= 2) {
+        const inferred = inferCorrectFromExplanation(d.explanation, d.options, correctIdx)
+        if (inferred !== null && inferred !== correctIdx) {
+          correctIdx = inferred
+        }
       }
       quizBlocks.push({
         start: m.index,
